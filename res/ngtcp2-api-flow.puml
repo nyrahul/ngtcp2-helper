@@ -1,0 +1,118 @@
+@startuml
+
+skinparam sequenceMessageAlign center
+
+skinparam sequence {
+    ArrowColor Olive
+}
+
+title ngtcp2 API flow
+
+box "Client" #LightGray
+participant APP_cli as APPc
+participant OpenSSL_cli as SSLc
+participant ngtcp2_cli as ngc #00ffff
+participant Platform_cli as Pc
+end box
+
+box "Server" #LightGray
+participant Platform_srv as Ps
+participant ngtcp2_srv as ngs #00ffff
+participant OpenSSL_srv as SSLs
+participant APP_srv as APPs
+end box
+
+APPc -> SSLc: init_ssl()\nget SSL_ctx\ncreate BIO\nSSL_set_msg_callback()\nSSL_set_key_callback()\nset ALPN\nset SNI
+
+APPc [#blue]-> ngc: [conn,dcid] = ngtcp2_conn_client_new\n(callbacks, scid, path, transport_settings)
+
+alt client initial
+ngc [#magenta]-> APPc: client_initial(conn)
+APPc [#blue]-> ngc: ngtcp2_conn_install_initial_tx_keys\n(conn, key, iv, hp)
+note right
+setup_initial_crypto_context() .. examples/client.cc
+hp -> header protection keys
+key -> for packet protection
+iv -> initialization vector
+end note
+
+APPc [#blue]-> ngc: ngtcp2_conn_install_initial_rx_keys\n(conn, key, iv, hp)
+
+APPc [#blue]-> ngc: [dstbuf] = \nngtcp2_conn_client_write_handshake(conn)
+ngc [#magenta]-> APPc: in_encrypt()
+note right
+in_encrypt() is callbacked to encrypt Initial packets
+end note
+end 'client initial
+
+APPc -> APPc: start TLS handshake
+APPc -> SSLc: SSL_do_handshake()
+APPc -> Pc: udp_sendto(dstbuf)
+Pc --> Ps: << packet >>
+
+Ps -> APPs: buf = udp_recvfrom()
+APPs [#blue]-> ngs: ngtcp2_pkt_decode_hd_long(buf)\nngtcp2_pkt_decode_hd_short(buf)
+APPs -> APPs: Find conn based on dcid in the decoded header
+
+alt Conn not found
+APPs [#blue]-> ngs: ngtcp2_accept()
+note left
+ngtcp2_accept: Decides whether packet is acceptable as initial packet from client.
+Returns 0, if acceptable. Return 1, if not acceptable, and Version Negotiation
+packet is required to send. Otherwise, returns -1.
+end note
+
+APPs -> SSLs: init_ssl()\nget SSL_ctx\ncreate BIO\nSSL_set_msg_callback()\nSSL_set_key_callback()\nset ALPN\nset SNI
+APPs [#blue]-> ngs: [conn, scid] = ngtcp2_conn_server_new\n(dcid, path, settings, callbacks)
+
+alt Recv Client Initial
+ngs [#magenta]-> APPs: recv_client_initial()
+APPs [#blue]-> ngs: ngtcp2_conn_install_tx_keys\n(conn, key, iv, hp)
+APPs [#blue]-> ngs: ngtcp2_conn_install_rx_keys\n(conn, key, iv, hp)
+APPs [#blue]-> ngs: [dstbuf] = \nngtcp2_conn_client_write_handshake(conn)
+ngs [#magenta]-> APPs: in_encrypt()
+APPs -> Ps: udp_sendto(dstbuf)
+Ps --> Pc: << packet >>
+Pc -> APPc: udp_recvfrom()
+APPc [#blue]-> ngc: ngtcp2_conn_read_handshake()
+ngc [#magenta]-> APPc: in_decrypt()
+note right
+in_decrypt() is called to decrypt Initial packets only.
+end note
+...
+ngc [#magenta]-> APPc: handshake_completed()
+end 'Recv Client Initial
+
+else Conn Found
+    alt Handshake is completed
+    APPs [#blue]-> ngs: ngtcp2_conn_read_pkt(conn, buf)
+    ngs [#magenta]-> APPs: decrypt()
+    note left
+    decrypt() is different from in_decrypt().
+    decrypt() callback is used for general non-Initial packets decryption.
+    end note
+    else Handshake in progress
+        APPs [#blue]-> ngs: ngtcp2_conn_read_handshake(conn, buf)
+        ngs [#magenta]-> APPs: in_decrypt()
+        ...
+        ngs [#magenta]-> APPs: handshake_completed()
+    end 'Handshake
+end 'conn presence
+
+... security handshake completed ...
+
+APPc [#blue]-> ngc: ngtcp2_conn_writev_stream(conn, id, buf)
+ngc [#magenta]-> APPc: encrypt()
+note right
+encrypt() is used for non-Initial packet encryption.
+end note
+APPc [#blue]-> ngc: pkt = ngtcp2_conn_write_pkt(conn)
+APPc -> Pc: udp_sendto(pkt)
+Pc --> Ps: << packet >>
+Ps -> APPs: udp_recvfrom()
+APPs [#blue]-> ngs: ngtcp2_conn_read_pkt()
+ngs [#magenta]-> APPs: decrypt()
+ngs [#magenta]-> APPs: stream_open()
+ngs [#magenta]-> APPs: recv_stream_data()
+
+@enduml
