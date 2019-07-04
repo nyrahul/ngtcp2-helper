@@ -52,7 +52,7 @@ Pc --> Ps: << packet >>
 
 Ps -> APPs: buf = udp_recvfrom()
 APPs [#blue]-> ngs: ngtcp2_pkt_decode_hd_long(buf)\nngtcp2_pkt_decode_hd_short(buf)
-APPs -> APPs: Find conn based on dcid in the decoded header
+APPs -> APPs: Find conn based on \ndcid in the decoded header
 
 alt Conn not found
 APPs [#blue]-> ngs: ngtcp2_accept()
