@@ -6,7 +6,7 @@ skinparam sequence {
     ArrowColor Olive
 }
 
-title ngtcp2 API flow
+title QUIC/ngtcp2 detailed security handshake
 
 box "Client" #LightGray
 participant APP_cli as APPc
@@ -15,12 +15,12 @@ participant ngtcp2_cli as ngc #00ffff
 participant Platform_cli as Pc
 end box
 
-box "Server" #LightGray
-participant Platform_srv as Ps
-participant ngtcp2_srv as ngs #00ffff
-participant OpenSSL_srv as SSLs
-participant APP_srv as APPs
-end box
+' box "Server" #LightGray
+' participant Platform_srv as Ps
+' participant ngtcp2_srv as ngs #00ffff
+' participant OpenSSL_srv as SSLs
+' participant APP_srv as APPs
+' end box
 
 APPc -> SSLc: init_ssl()\nget SSL_ctx\ncreate BIO\nSSL_set_msg_callback()\nSSL_set_key_callback()\nset ALPN\nset SNI
 APPc -> SSLc: SSL_CTX_add_custom_ext(transport_params_add_cb);
@@ -28,9 +28,8 @@ note right
 OpenSSL is extended by ngtcp2 to support this callback
 end note
 
-'activate ngc
-'activate APPc
 APPc [#blue]-> ngc: [conn] = ngtcp2_conn_client_new\n(callbacks, scid, path, transport_settings)
+alt Install keys
 APPc [#blue]-> ngc: [dcid] = ngtcp2_conn_get_dcid(conn)
 APPc -> SSLc: derive_initial_secret() \n [initial_secret] = HKDF-Extract\n(dcid, SALT)
 APPc -> SSLc: derive_client_initial_secret() \n [client_initial_secret] = HKDF-Expand-Label\n(initial_secret, "client in")
@@ -47,13 +46,11 @@ APPc -> SSLc: derive_packet_protection_key()\n [key] = HKDF-Expand-Label\n(srv_i
 APPc -> SSLc: derive_packet_protection_iv()\n [iv] = HKDF-Expand-Label\n(srv_initial_secret, "quic iv")
 APPc -> SSLc: derive_header_protection_key()\n [hp_key] = HKDF-Expand-Label\n(srv_initial_secret, "quic hp")
 APPc [#blue]-> ngc: ngtcp2_conn_install_initial_rx_keys\n(conn, key, iv, hp_key)
+end alt
 
+alt Write handshake
 APPc [#blue]-> ngc: pkt = ngtcp2_conn_write_handshake(conn)
-'deactivate ngc
-'deactivate APPc
-
-'activate ngc
-'activate APPc
+activate APPc
 ngc [#magenta]-> APPc: client_initial()
 APPc -> SSLc: SSL_do_handshake()
 SSLc [#red]-> APPc: transport_params_add_cb() callback from SSL
@@ -66,9 +63,57 @@ ngc [#magenta]-> APPc: [dest, destlen] = do_in_hp_mask(plaintxt, key, nonce, ad)
 note right
 Encrypt handshake pkt and protect pkt header
 end note
-'deactivate ngc
-'deactivate APPc
+APPc -> APPc: get handshake packet
+deactivate APPc
+end alt
+APPc -> Pc: udp_sendto(pkt)
+Pc ->]: << packet to the server >>
+]-> Pc: << packet from the server >>
+Pc -> APPc: pkt = udp_recvfrom()
+APPc -> APPc: get conn based on dcid
+alt Handle Crypto data
+APPc [#blue]-> ngc: ngtcp2_conn_read_handshake(conn, pkt)
+ngc [#magenta]-> APPc: do_in_hp_mask()
+ngc [#magenta]-> APPc: do_hs_decrypt()
+ngc [#magenta]-> APPc: recv_crypto_data()
+APPc -> SSLc: SSL_do_handshake()
+SSLc [#red]-> APPc: on_key SSL_KEY_SERVER_HANDSHAKE_TRAFFIC
+APPc -> SSLc: key = derive_packet_protection_key()
+APPc -> SSLc: iv = derive_packet_protection_iv()
+APPc -> SSLc: hp_key = derive_header_protection_key()
+APPc [#blue]-> ngc: ngtcp2_conn_set_aead_overhead(conn, crypto_ctx)
+APPc [#blue]-> ngc: ngtcp2_conn_install_handshake_rx_keys(conn, crypto_ctx)
+ngc [#magenta]-> APPc: acked_crypto_offset()
+end alt
 
+... follow similar procedure as above and get other keys ...
+
+alt get SSL_KEY_SERVER_APPLICATION_TRAFFIC
+note over APPc, Pc
+ngtcp_conn_install_rx_keys()
+end note
+end alt
+
+alt get SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC
+note over APPc, Pc
+ngtcp_conn_install_handshake_tx_keys()
+end note
+end alt
+
+alt get SSL_KEY_CLIENT_APPLICATION_TRAFFIC
+note over APPc, Pc
+ngtcp_conn_install_tx_keys()
+SSL_get0_alpn_selected()
+end note
+end alt
+
+ngc [#magenta]-> APPc: handshake_completed
+
+legend top left
+    1. Blue line is ngtcp2 exported interfaces
+    2. Magenta line is ngtcp2 callbacks to app
+    3. Red line is SSL callbacks to app
+endlegend
 
 
 ' add note here for legends
