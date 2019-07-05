@@ -23,11 +23,17 @@ participant APP_srv as APPs
 end box
 
 APPc -> SSLc: init_ssl()\nget SSL_ctx\ncreate BIO\nSSL_set_msg_callback()\nSSL_set_key_callback()\nset ALPN\nset SNI
+APPc -> SSLc: SSL_CTX_add_custom_ext(transport_params_add_cb);
+note right
+OpenSSL is extended by ngtcp2 to support this callback
+end note
 
+activate ngc
+activate APPc
 APPc [#blue]-> ngc: [conn] = ngtcp2_conn_client_new\n(callbacks, scid, path, transport_settings)
-APPc [#blue]-> ngc: [dcid] = ngtcp2_conn_get_dcid\n(conn)
-APPc -> SSLc: [initial_secret] = HKDF-Extract\n(dcid, SALT)
-APPc -> SSLc: [client_initial_secret] = HKDF-Expand-Label\n(initial_secret, "client in")
+APPc [#blue]-> ngc: [dcid] = ngtcp2_conn_get_dcid(conn)
+APPc -> SSLc: derive_initial_secret() \n [initial_secret] = HKDF-Extract\n(dcid, SALT)
+APPc -> SSLc: derive_client_initial_secret() \n [client_initial_secret] = HKDF-Expand-Label\n(initial_secret, "client in")
 note right
 These are defined in QUIC-TLS draft(ver-20) in Section 5.2
 end note
@@ -36,19 +42,35 @@ APPc -> SSLc: derive_packet_protection_iv()\n [iv] = HKDF-Expand-Label\n(client_
 APPc -> SSLc: derive_header_protection_key()\n [hp_key] = HKDF-Expand-Label\n(client_initial_secret, "quic hp")
 APPc [#blue]-> ngc: ngtcp2_conn_install_initial_tx_keys\n(conn, key, iv, hp_key)
 
-APPc -> SSLc: derive_server_initial_secret()\n [hp_key] = HKDF-Expand-Label\n(client_initial_secret, "quic hp")
+APPc -> SSLc: derive_server_initial_secret() \n [srv_initial_secret] = HKDF-Extract\n(initial_secret, SALT)
+APPc -> SSLc: derive_packet_protection_key()\n [key] = HKDF-Expand-Label\n(srv_initial_secret, "quic key")
+APPc -> SSLc: derive_packet_protection_iv()\n [iv] = HKDF-Expand-Label\n(srv_initial_secret, "quic iv")
+APPc -> SSLc: derive_header_protection_key()\n [hp_key] = HKDF-Expand-Label\n(srv_initial_secret, "quic hp")
+APPc [#blue]-> ngc: ngtcp2_conn_install_initial_rx_keys\n(conn, key, iv, hp_key)
 
+APPc [#blue]-> ngc: pkt = ngtcp2_conn_write_handshake(conn)
+deactivate ngc
+deactivate APPc
 
-alt client initial
-ngc [#magenta]-> APPc: client_initial(conn)
+activate ngc
+activate APPc
+ngc [#magenta]-> APPc: client_initial()
+APPc -> SSLc: SSL_do_handshake()
+SSLc [#red]-> APPc: transport_params_add_cb() callback from SSL
+APPc [#blue]-> ngc: params = ngtcp2_conn_get_local_transport_params(conn)
+SSLc [#red]-> APPc: msg_cb SSL3_RT_HANDSHAKE(buf, len)
+APPc [#blue]-> ngc: ngtcp2_conn_submit_crypto_data\n(conn, NGTCP2_CRYPTO_LEVEL_INITIAL, buf, len)
+ngc -> ngc: create CRYPTO frame
+ngc [#magenta]-> APPc: [dest, destlen] = do_hs_encrypt(plaintxt, key, nonce, ad)
+ngc [#magenta]-> APPc: [dest, destlen] = do_in_hp_mask(plaintxt, key, nonce, ad)
 note right
-setup_initial_crypto_context() .. examples/client.cc
-hp -> header protection keys
-key -> for packet protection
-iv -> initialization vector
+Encrypt handshake pkt and protect pkt header
 end note
+deactivate ngc
+deactivate APPc
 
-APPc [#blue]-> ngc: ngtcp2_conn_install_initial_rx_keys\n(conn, key, iv, hp)
 
+
+' add note here for legends
 
 @enduml
