@@ -28,8 +28,8 @@ note right
 OpenSSL is extended by ngtcp2 to support this callback
 end note
 
-activate ngc
-activate APPc
+'activate ngc
+'activate APPc
 APPc [#blue]-> ngc: [conn] = ngtcp2_conn_client_new\n(callbacks, scid, path, transport_settings)
 APPc [#blue]-> ngc: [dcid] = ngtcp2_conn_get_dcid(conn)
 APPc -> SSLc: derive_initial_secret() \n [initial_secret] = HKDF-Extract\n(dcid, SALT)
@@ -49,11 +49,11 @@ APPc -> SSLc: derive_header_protection_key()\n [hp_key] = HKDF-Expand-Label\n(sr
 APPc [#blue]-> ngc: ngtcp2_conn_install_initial_rx_keys\n(conn, key, iv, hp_key)
 
 APPc [#blue]-> ngc: pkt = ngtcp2_conn_write_handshake(conn)
-deactivate ngc
-deactivate APPc
+'deactivate ngc
+'deactivate APPc
 
-activate ngc
-activate APPc
+'activate ngc
+'activate APPc
 ngc [#magenta]-> APPc: client_initial()
 APPc -> SSLc: SSL_do_handshake()
 SSLc [#red]-> APPc: transport_params_add_cb() callback from SSL
@@ -66,8 +66,8 @@ ngc [#magenta]-> APPc: [dest, destlen] = do_in_hp_mask(plaintxt, key, nonce, ad)
 note right
 Encrypt handshake pkt and protect pkt header
 end note
-deactivate ngc
-deactivate APPc
+'deactivate ngc
+'deactivate APPc
 
 
 
