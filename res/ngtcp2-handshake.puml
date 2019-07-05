@@ -1,0 +1,54 @@
+@startuml
+
+skinparam sequenceMessageAlign center
+
+skinparam sequence {
+    ArrowColor Olive
+}
+
+title ngtcp2 API flow
+
+box "Client" #LightGray
+participant APP_cli as APPc
+participant OpenSSL_cli as SSLc
+participant ngtcp2_cli as ngc #00ffff
+participant Platform_cli as Pc
+end box
+
+box "Server" #LightGray
+participant Platform_srv as Ps
+participant ngtcp2_srv as ngs #00ffff
+participant OpenSSL_srv as SSLs
+participant APP_srv as APPs
+end box
+
+APPc -> SSLc: init_ssl()\nget SSL_ctx\ncreate BIO\nSSL_set_msg_callback()\nSSL_set_key_callback()\nset ALPN\nset SNI
+
+APPc [#blue]-> ngc: [conn] = ngtcp2_conn_client_new\n(callbacks, scid, path, transport_settings)
+APPc [#blue]-> ngc: [dcid] = ngtcp2_conn_get_dcid\n(conn)
+APPc -> SSLc: [initial_secret] = HKDF-Extract\n(dcid, SALT)
+APPc -> SSLc: [client_initial_secret] = HKDF-Expand-Label\n(initial_secret, "client in")
+note right
+These are defined in QUIC-TLS draft(ver-20) in Section 5.2
+end note
+APPc -> SSLc: derive_packet_protection_key()\n [key] = HKDF-Expand-Label\n(client_initial_secret, "quic key")
+APPc -> SSLc: derive_packet_protection_iv()\n [iv] = HKDF-Expand-Label\n(client_initial_secret, "quic iv")
+APPc -> SSLc: derive_header_protection_key()\n [hp_key] = HKDF-Expand-Label\n(client_initial_secret, "quic hp")
+APPc [#blue]-> ngc: ngtcp2_conn_install_initial_tx_keys\n(conn, key, iv, hp_key)
+
+APPc -> SSLc: derive_server_initial_secret()\n [hp_key] = HKDF-Expand-Label\n(client_initial_secret, "quic hp")
+
+
+alt client initial
+ngc [#magenta]-> APPc: client_initial(conn)
+note right
+setup_initial_crypto_context() .. examples/client.cc
+hp -> header protection keys
+key -> for packet protection
+iv -> initialization vector
+end note
+
+APPc [#blue]-> ngc: ngtcp2_conn_install_initial_rx_keys\n(conn, key, iv, hp)
+
+
+@enduml
