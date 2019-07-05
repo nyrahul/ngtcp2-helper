@@ -27,9 +27,9 @@ Please note that this is not a rigorous representation i.e., the flow is
 supposed to give an idea about how ngtcp2 APIs manages handshake, connections
 and streams.
 
-![QUIC/ngtcp2 handshake flow](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/nyrahul/ngtcp2-helper/master/res/ngtcp2-handshake.puml?cache=no)
+![QUIC/ngtcp2 handshake flow](res/ngtcp2-handshake.png)
 
-![ngtcp2 API flow](http://www.plantuml.com/plantuml/proxy?src=https://raw.githubusercontent.com/nyrahul/ngtcp2-helper/master/res/ngtcp2-api-flow.puml?cache=no)
+![ngtcp2 API flow](res/ngtcp2-api-flow.png)
 
 # QUIC pcap
 
